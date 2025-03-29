@@ -512,7 +512,7 @@ class App:
                     pyxel.text(SCREEN_WIDTH // 2 - 40, SCREEN_HEIGHT // 2 - 10, "GAME CLEAR!", 7)
                     pyxel.text(SCREEN_WIDTH // 2 - 50, SCREEN_HEIGHT // 2 + 5, "THANKS FOR PLAYING!", 7)
 
-                if pyxel.btnp(pyxel.KEY_SPACE):  # スペースキーで次のステージへ
+                if (pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A)):  # スペースキーで次のステージへ
                     if self.stage_number < MAX_STAGE:  # MAX_STAGEより小さい場合
                         self.stage_number += 1
                         self.stage = Stage(self.stage_number)
