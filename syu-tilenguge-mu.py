@@ -28,14 +28,14 @@ class Frog:
         self.animation_frame = 0
 
     def update(self):
-        if pyxel.btn(pyxel.KEY_UP) and self.y > 0:
+        if (pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_UP)) and self.y > 0:
             self.y -= 2
-        if pyxel.btn(pyxel.KEY_DOWN) and self.y < pyxel.height - self.h:
+        if (pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_DOWN)) and self.y < pyxel.height - self.h:
             self.y += 2
-        if pyxel.btn(pyxel.KEY_LEFT) and self.x > 0:
+        if (pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_LEFT)) and self.x > 0:
             self.x -= 2
             self.direction = -1
-        if pyxel.btn(pyxel.KEY_RIGHT) and self.x < pyxel.width - self.w:
+        if (pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_RIGHT)) and self.x < pyxel.width - self.w:
             self.x += 2
             self.direction = 1
 
@@ -239,7 +239,7 @@ class App:
                 break
 
         # 弾丸の発射
-        if pyxel.btnp(pyxel.KEY_SPACE):
+        if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A):
             self.bullets.append(self.frog.shoot())
 
     def draw(self):
