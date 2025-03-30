@@ -292,7 +292,12 @@ class Stage:
         self.enemy_spawn_interval = ENEMY_SPAWN_INTERVAL - stage_number * 2  # ステージが進むごとに敵の出現頻度を上げる
         if self.enemy_spawn_interval < 5:
             self.enemy_spawn_interval = 5
-        self.background_color = stage_number % 16  # 背景色をステージ数で変化
+        #背景色をステージ数で変化
+        if stage_number == 10:
+            self.background_color = 9
+        else:
+          self.background_color = stage_number % 16
+
         self.enemy_types = [0, 1, 2]  # 出現する敵の種類
 
         # ステージごとの初期化処理 (背景、敵の種類、出現頻度など)
@@ -314,7 +319,7 @@ class Stage:
 
 class App:
     def __init__(self):
-        pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT)  # 画面サイズ変更
+        pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT, caption="Frog Shooting")  # 画面サイズ変更
         pyxel.load("frog_shooting.pyxres")
 
         # サウンドの設定 (pyxresファイルで定義)
