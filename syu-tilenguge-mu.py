@@ -73,12 +73,11 @@ class Frog:
         if self.animation_frame == 3:
             offset_y = 3
         elif self.animation_frame == 6:
-            offset_y = -3
+            offset_y = 3
 
         pyxel.blt(self.x, self.y + offset_y, 0, u, 0, self.w * self.direction, self.h, 0)  # 反転描画
 
     def shoot(self):
-        pyxel.play(SOUND_BULLET_SHOOT, 0) # 弾発射音
         return Bullet(self.x + self.w // 2, self.y)
 
     def is_colliding(self, enemy):
@@ -283,9 +282,9 @@ class Explosion:
     def draw(self):
         # 爆発エフェクトを描画
         if self.is_boss:
-          pyxel.blt(self.x - 8, self.y - 8, 0, 32, 0, 32, 32, 0)
+            pyxel.blt(self.x - 8, self.y - 8, 0, 32, 0, 32, 32, 0)
         else:
-          pyxel.blt(self.x, self.y, 0, 48, 16, 16, 16, 0)
+            pyxel.blt(self.x, self.y, 0, 48, 16, 16, 16, 0)
 
 class Stage:
     def __init__(self, stage_number):
@@ -457,7 +456,7 @@ class App:
             self.bullets.append(self.frog.shoot())
 
         # ステージクリア判定
-        stage_clear_score = self.stage_number * 500  # ステージ数×500
+        stage_clear_score = 500 + self.stage_number * 100  # 500 + ステージ数 * 100
         if self.score >= stage_clear_score:
             if self.stage_number != MAX_STAGE or (self.boss is not None and not self.boss.alive):  # MAX_STAGE以外 または ボスが倒されたら
                 self.stage_cleared = True
