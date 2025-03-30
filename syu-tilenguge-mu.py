@@ -319,7 +319,7 @@ class Stage:
 
 class App:
     def __init__(self):
-        pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT, caption="Frog Shooting")  # 画面サイズ変更
+        pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT)  # 画面サイズ変更
         pyxel.load("frog_shooting.pyxres")
 
         # サウンドの設定 (pyxresファイルで定義)
