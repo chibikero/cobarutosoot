@@ -1,5 +1,6 @@
 import pyxel
 import random
+import math
 
 # 定数の定義
 SCREEN_WIDTH = 256
@@ -11,519 +12,389 @@ BULLET_WIDTH = 4
 BULLET_HEIGHT = 2
 ENEMY_WIDTH = 16
 ENEMY_HEIGHT = 16
-ENEMY_SPAWN_INTERVAL = 30
+ENEMY_SPAWN_INTERVAL = 35
 FROG_MAX_HP = 100
 HP_BAR_WIDTH = 50
 HP_BAR_HEIGHT = 5
-MAX_STAGE = 10  # 最大ステージ数
+FORCE_DELAY = 8
 
 # サウンドチャンネル
 SOUND_ENEMY_DEATH = 0
 SOUND_BULLET_SHOOT = 1
-SOUND_BOSS_DEATH = 2
 MUSIC_STAGE = 0
+SOUND_ITEM_GET = 3
+SOUND_LASER_SHOOT = 2
 
 class Star:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.speed = random.uniform(0.5, 1.5)
-        self.color = random.choice([7, 15])  # 白または灰色
-
+        self.x, self.y = x, y; self.speed = random.uniform(0.5, 1.5); self.color = random.choice([7, 15])
     def update(self):
         self.x -= self.speed
-        if self.x < 0:
-            self.x = SCREEN_WIDTH
-            self.y = random.randint(0, SCREEN_HEIGHT)
+        if self.x < 0: self.x, self.y = SCREEN_WIDTH, random.randint(0, SCREEN_HEIGHT)
+    def draw(self): pyxel.pset(self.x, self.y, self.color)
 
+class Force:
+    def __init__(self, delay):
+        self.delay, self.x, self.y, self.w, self.h, self.size = delay, -16, -16, 0, 0, 3
+    def update(self, frog_history):
+        if len(frog_history) > self.delay:
+            pos = frog_history[self.delay]; self.x, self.y = pos[0] + FROG_WIDTH / 2, pos[1] + FROG_HEIGHT / 2
     def draw(self):
-        pyxel.pset(self.x, self.y, self.color)
+        if self.x >= 0: pyxel.circ(self.x, self.y, self.size, 10); pyxel.circb(self.x, self.y, self.size, 3)
+    def shoot(self): return Bullet(self.x, self.y - BULLET_HEIGHT / 2)
+    def is_colliding(self, bullet):
+        if self.x < 0: return False
+        return math.hypot(self.x - (bullet.x + bullet.w / 2), self.y - (bullet.y + bullet.h / 2)) < self.size + 2
+
+class ForceItem:
+    def __init__(self, x, y):
+        self.x, self.y, self.w, self.h = x, y, 8, 8; self.alive, self.speed_x, self.frame = True, -0.5, 0
+    def update(self):
+        self.x += self.speed_x; self.y += math.sin(self.frame * 0.1) * 5; self.frame += 1
+        if self.x < -self.w: self.alive = False
+    def draw(self):
+        if (self.frame // 4) % 2 == 0:
+            cx, cy, r = self.x + self.w/2, self.y + self.h/2, self.w/2
+            pyxel.circ(cx, cy, r, 10); pyxel.circb(cx, cy, r, 3)
+    def is_colliding(self, frog): return (self.x < frog.x + frog.w and self.x + self.w > frog.x and self.y < frog.y + frog.h and self.y + self.h > frog.y)
+
+class Funnel:
+    def __init__(self, frog):
+        self.frog, self.x, self.y = frog, frog.x, frog.y; self.target_x, self.target_y, self.move_timer = self.x, self.y, 0
+        self.move_speed, self.size = 0.05, 4; self.shoot_timer = random.randint(30, 90)
+        self.w, self.h = 0, 0
+    def update(self):
+        self.move_timer -= 1
+        if self.move_timer <= 0:
+            frog_center_x, frog_center_y = self.frog.x + self.frog.w / 2, self.frog.y + self.frog.h / 2
+            angle, radius = random.uniform(0, 360), random.uniform(30, 80)
+            self.target_x, self.target_y = frog_center_x + math.cos(math.radians(angle)) * radius, frog_center_y + math.sin(math.radians(angle)) * radius
+            self.move_timer = random.randint(30, 90)
+        self.x += (self.target_x - self.x) * self.move_speed; self.y += (self.target_y - self.y) * self.move_speed
+    def draw(self):
+        pyxel.tri(self.x, self.y - self.size, self.x - self.size, self.y, self.x + self.size, self.y, 11)
+        pyxel.tri(self.x, self.y + self.size, self.x - self.size, self.y, self.x + self.size, self.y, 11)
+    def auto_shoot(self):
+        self.shoot_timer -= 1
+        if self.shoot_timer <= 0:
+            self.shoot_timer = random.randint(60, 120); pyxel.play(SOUND_LASER_SHOOT, 11)
+            return Laser(self.x, self.y, angle=random.uniform(0, 2 * math.pi))
+        return None
+    def is_colliding(self, bullet):
+        return math.hypot(self.x - (bullet.x + bullet.w/2), self.y - (bullet.y + bullet.h/2)) < self.size + 2
+
+class FunnelItem:
+    def __init__(self, x, y):
+        self.x, self.y, self.w, self.h = x, y, 8, 8; self.alive, self.speed_x, self.frame = True, -0.5, 0
+    def update(self):
+        self.x += self.speed_x; self.y += math.sin(self.frame * 0.08) * 4; self.frame += 1
+        if self.x < -self.w: self.alive = False
+    def draw(self):
+        if (self.frame // 4) % 2 == 0:
+            cx, cy, size = self.x + self.w/2, self.y + self.h/2, self.w/2
+            pyxel.tri(cx, cy - size, cx - size, cy, cx + size, cy, 11)
+            pyxel.tri(cx, cy + size, cx - size, cy, cx + size, cy, 11)
+    def is_colliding(self, frog): return (self.x < frog.x + frog.w and self.x + self.w > frog.x and self.y < frog.y + frog.h and self.y + self.h > frog.y)
+
+class Missile:
+    def __init__(self, x, y):
+        self.x, self.y, self.w, self.h, self.damage = x, y, 6, 6, 2
+        self.speed, self.angle, self.turn_speed = 2.0, 0.0, 4.0
+        self.target = None
+    def update(self, enemies):
+        if self.target is None or not self.target.alive: self.target = self.find_closest_enemy(enemies)
+        if self.target:
+            target_angle = math.degrees(math.atan2(self.target.y - self.y, self.target.x - self.x))
+            angle_diff = (target_angle - self.angle + 180) % 360 - 180
+            self.angle += max(-self.turn_speed, min(self.turn_speed, angle_diff))
+        self.x += self.speed * math.cos(math.radians(self.angle)); self.y += self.speed * math.sin(math.radians(self.angle))
+    def find_closest_enemy(self, enemies):
+        closest_enemy, min_dist = None, float('inf')
+        for enemy in enemies:
+            if not enemy.alive: continue
+            dist = math.hypot(self.x - enemy.x, self.y - enemy.y)
+            if dist < min_dist: min_dist, closest_enemy = dist, enemy
+        return closest_enemy
+    def draw(self):
+        angle_rad = math.radians(self.angle)
+        p1_x, p1_y = self.x + self.w*math.cos(angle_rad), self.y + self.h*math.sin(angle_rad)
+        p2_x, p2_y = self.x + self.w*0.5*math.cos(angle_rad+math.radians(150)), self.y + self.h*0.5*math.sin(angle_rad+math.radians(150))
+        p3_x, p3_y = self.x + self.w*0.5*math.cos(angle_rad-math.radians(150)), self.y + self.h*0.5*math.sin(angle_rad-math.radians(150))
+        pyxel.tri(p1_x, p1_y, p2_x, p2_y, p3_x, p3_y, 8)
+        tail_x, tail_y = self.x - self.w*0.7*math.cos(angle_rad), self.y - self.h*0.7*math.sin(angle_rad)
+        pyxel.circ(tail_x, tail_y, random.uniform(1, 2.5), random.choice([9, 10]))
+    def is_offscreen(self): return self.x < -self.w or self.x > SCREEN_WIDTH or self.y < -self.h or self.y > SCREEN_HEIGHT
+
+class MissileItem:
+    def __init__(self, x, y):
+        self.x, self.y, self.w, self.h = x, y, 8, 8; self.alive, self.speed_x, self.frame = True, -0.5, 0
+    def update(self):
+        self.x += self.speed_x; self.y += math.sin(self.frame * 0.12) * 6; self.frame += 1
+        if self.x < -self.w: self.alive = False
+    def draw(self):
+        if (self.frame // 4) % 2 == 0:
+            cx, cy, size = self.x + self.w/2, self.y + self.h/2, self.w/2
+            pyxel.tri(cx + size, cy, cx - size, cy - size, cx - size, cy + size, 8)
+    def is_colliding(self, frog): return (self.x < frog.x + frog.w and self.x + self.w > frog.x and self.y < frog.y + frog.h and self.y + self.h > frog.y)
 
 class Frog:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.w = FROG_WIDTH
-        self.h = FROG_HEIGHT
-        self.alive = True
-        self.direction = 1  # 1: 右, -1: 左
-        self.animation_frame = 0
-        self.hp = FROG_MAX_HP  # HPを追加
-
+        self.x, self.y, self.w, self.h = x, y, FROG_WIDTH, FROG_HEIGHT; self.alive, self.direction, self.animation_frame = True, 1, 0
+        self.hp = FROG_MAX_HP; self.forces, self.funnels, self.history = [], [], []; self.has_missile = False
+    def add_force(self): self.forces.append(Force(len(self.forces) * FORCE_DELAY + FORCE_DELAY)); pyxel.play(SOUND_ITEM_GET, 10)
+    def add_funnel(self): self.funnels.append(Funnel(self)); pyxel.play(SOUND_ITEM_GET, 10)
+    def add_missile(self): self.has_missile = True; pyxel.play(SOUND_ITEM_GET, 10)
     def update(self):
-        if (pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_UP)) and self.y > 0:
-            self.y -= 2
-        if (pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_DOWN)) and self.y < SCREEN_HEIGHT - self.h:
-            self.y += 2
-        if (pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_LEFT)) and self.x > 0:
-            self.x -= 2
-            self.direction = -1
-        if (pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.GAMEPAD1_BUTTON_DPAD_RIGHT)) and self.x < SCREEN_WIDTH - self.w:
-            self.x += 2
-            self.direction = 1
-
-        self.animation_frame = (self.animation_frame + 1) % 10  # アニメーション速度
-
+        if pyxel.btn(pyxel.KEY_UP): self.y = max(0, self.y - 2)
+        if pyxel.btn(pyxel.KEY_DOWN): self.y = min(SCREEN_HEIGHT - self.h, self.y + 2)
+        if pyxel.btn(pyxel.KEY_LEFT): self.x = max(0, self.x - 2); self.direction = -1
+        if pyxel.btn(pyxel.KEY_RIGHT): self.x = min(SCREEN_WIDTH - self.w, self.x + 2); self.direction = 1
+        self.history.insert(0, (self.x, self.y))
+        if len(self.history) > len(self.forces) * FORCE_DELAY + 10: self.history.pop()
+        for force in self.forces: force.update(self.history)
+        for funnel in self.funnels: funnel.update()
+        self.animation_frame = (self.animation_frame + 1) % 10
     def draw(self):
-        # 方向に応じて画像を反転
-        u = 0 if self.direction == 1 else 16
-
-        # アニメーション: 若干上下に揺れる
-        offset_y = 0
-        if self.animation_frame == 3:
-            offset_y = 3
-        elif self.animation_frame == 6:
-            offset_y = 3
-
-        pyxel.blt(self.x, self.y + offset_y, 0, u, 0, self.w * self.direction, self.h, 0)  # 反転描画
-
+        for force in self.forces: force.draw()
+        for funnel in self.funnels: funnel.draw()
+        u, offset_y = (0, 3) if self.direction == 1 else (16, 3)
+        if self.animation_frame not in [3, 6]: offset_y = 0
+        pyxel.blt(self.x, self.y + offset_y, 0, u, 0, self.w * self.direction, self.h, 0)
     def shoot(self):
-        return Bullet(self.x + self.w // 2, self.y)
-
-    def is_colliding(self, enemy):
-        # カエルと敵の当たり判定を大きく
-        return (self.x - 3 < enemy.x + enemy.w and
-                self.x + self.w + 3 > enemy.x and
-                self.y - 3 < enemy.y + enemy.h and
-                self.y + self.h + 3 > enemy.y)
-
-    def is_colliding_enemy_bullet(self, bullet):
-        # カエルと敵弾の当たり判定を大きく
-        return (self.x - 3 < bullet.x + BULLET_WIDTH and
-                self.x + self.w + 3 > bullet.x and
-                self.y - 3 < bullet.y + BULLET_HEIGHT and
-                self.y + self.h + 3 > bullet.y)
-
-    def take_damage(self, damage):
-        self.hp -= damage
-        if self.hp <= 0:
-            self.hp = 0
-            self.alive = False
-
+        new_bullets = [Bullet(self.x + self.w / 2, self.y)]
+        for force in self.forces:
+            if force.x >= 0: new_bullets.append(force.shoot())
+        return new_bullets
+    def is_colliding(self, obj): return (self.x-3 < obj.x+obj.w and self.x+self.w+3 > obj.x and self.y-3 < obj.y+obj.h and self.y+self.h+3 > obj.y)
+    def take_damage(self, damage): self.hp = max(0, self.hp - damage); self.alive = self.hp > 0
     def draw_hp_bar(self, x, y):
-        # HPバーの描画
-        bar_width = int(HP_BAR_WIDTH * (self.hp / FROG_MAX_HP))
-        pyxel.rect(x, y, HP_BAR_WIDTH, HP_BAR_HEIGHT, 8)  # 背景 (暗い赤)
-        pyxel.rect(x, y, bar_width, HP_BAR_HEIGHT, 10)  # HP (明るい赤)
+        bar_width = int(HP_BAR_WIDTH * (self.hp / FROG_MAX_HP)); pyxel.rect(x, y, HP_BAR_WIDTH, HP_BAR_HEIGHT, 8); pyxel.rect(x, y, bar_width, HP_BAR_HEIGHT, 10)
 
 class Bullet:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.speed = 4
-        self.is_enemy = False
+        self.x, self.y, self.w, self.h = x, y, BULLET_WIDTH, BULLET_HEIGHT
+        self.speed, self.damage = 4, 1
+    def update(self): self.x += self.speed
+    def draw(self): pyxel.rect(self.x, self.y + 4, self.w, self.h, 10)
+    def is_offscreen(self): return self.x > SCREEN_WIDTH
 
-    def update(self):
-        self.x += self.speed
-
+class Laser:
+    def __init__(self, x, y, angle, width=2, color=10, duration=15):
+        self.x, self.y, self.angle_rad, self.width, self.color, self.duration, self.damage = x, y, angle, width, color, duration, 1
+        self.length = SCREEN_WIDTH * 1.5
+    def update(self): self.duration -= 1; return self.duration <= 0
     def draw(self):
-        pyxel.rect(self.x, self.y + 4, BULLET_WIDTH, BULLET_HEIGHT, 10)  # 明るい青
-
-    def is_offscreen(self):
-        return self.x > SCREEN_WIDTH
+        end_x, end_y = self.x + self.length * math.cos(self.angle_rad), self.y + self.length * math.sin(self.angle_rad)
+        pyxel.line(self.x, self.y, end_x, end_y, self.color); pyxel.line(self.x + 1, self.y, end_x + 1, end_y, self.color)
+    def is_colliding(self, enemy):
+        x1, y1 = self.x, self.y; x2, y2 = self.x + self.length*math.cos(self.angle_rad), self.y + self.length*math.sin(self.angle_rad)
+        cx, cy = enemy.x + enemy.w/2, enemy.y + enemy.h/2
+        len_sq = (x2-x1)**2 + (y2-y1)**2
+        if len_sq == 0.0: return math.hypot(cx - x1, cy - y1) < (enemy.w + enemy.h) / 2
+        t = max(0, min(1, ((cx-x1)*(x2-x1) + (cy-y1)*(y2-y1)) / len_sq))
+        dist = math.hypot(cx - (x1 + t*(x2-x1)), cy - (y1 + t*(y2-y1)))
+        return dist < (enemy.w / 2) + self.width
 
 class EnemyBullet:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.speed = -2  # 敵の弾は左に飛ぶ
-        self.is_enemy = True
-
-    def update(self):
-        self.x += self.speed
-
-    def draw(self):
-        pyxel.rect(self.x, self.y + 4, BULLET_WIDTH, BULLET_HEIGHT, 8)  # 赤
-
-    def is_offscreen(self):
-        return self.x < 0
+    ### <<< 変更箇所 >>> ###
+    def __init__(self, x, y, stage_number):
+        self.x, self.y, self.w, self.h = x, y, BULLET_WIDTH, BULLET_HEIGHT
+        # ステージレベルに応じて弾速アップ
+        self.speed = -(2 + stage_number * 0.08)
+    def update(self): self.x += self.speed
+    def draw(self): pyxel.rect(self.x, self.y + 4, self.w, self.h, 8)
+    def is_offscreen(self): return self.x < 0
 
 class Enemy:
-    def __init__(self, x, y, enemy_type):
-        self.x = x
-        self.y = y
-        self.w = ENEMY_WIDTH
-        self.h = ENEMY_HEIGHT
-        self.speed = random.uniform(1, 4)
-        self.alive = True
-        self.type = enemy_type
-        self.animation_frame = 0
-        self.pattern = random.randint(0, 1)  # 動きのパターンをランダムに決定
-        self.shoot_delay = random.randint(60, 180)  # 射撃間隔
+    def __init__(self, x, y, enemy_type, stage_number):
+        self.x, self.y, self.w, self.h = x, y, ENEMY_WIDTH, ENEMY_HEIGHT
+        self.stage_number = stage_number # ### <<< 追加 >>> ###
+        self.speed = random.uniform(1, 4) + stage_number*0.05
+        self.alive, self.type, self.animation_frame = True, enemy_type, 0
+        self.pattern = random.randint(0, 1)
+        self.explosion, self.drop_item_on_death = None, (self.type == 2)
+        
+        ### <<< 変更箇所 >>> ###
+        # HP: 3ステージごとに1増加
+        self.max_hp = 1 + (stage_number // 3)
+        self.hp = self.max_hp
+        
+        # 攻撃頻度: ステージが進むと間隔が短くなる
+        self.shoot_delay = max(20, random.randint(100, 180) - stage_number * 3)
         self.shoot_timer = 0
-        self.explosion = None  # 爆発エフェクト
+        
+        # 接触ダメージ: 2ステージごとに1増加
+        base_damage = 10
+        if self.type == 1: base_damage = 20
+        elif self.type == 2: base_damage = 30
+        self.damage = base_damage + (stage_number // 2)
 
-        if self.type == 0:  # 基本的な敵
-            self.score_value = 10
-            self.image_x = 0
-            self.image_y = 16
-            self.damage = 10  # ダメージ
-        elif self.type == 1:  # 上下に移動する敵
-            self.speed_y = random.uniform(0.5, 1.5)
-            self.score_value = 20
-            self.image_x = 16
-            self.image_y = 16
-            self.damage = 20  # ダメージ
-        elif self.type == 2:  # 弾を撃つ敵
-            self.score_value = 30
-            self.image_x = 32
-            self.image_y = 16
-            self.damage = 30  # ダメージ
-
+        if self.type == 0: self.score_value, self.image_x, self.image_y = 10, 0, 16
+        elif self.type == 1: self.speed_y = random.uniform(0.5, 1.5) + stage_number*0.05; self.score_value, self.image_x, self.image_y = 20, 16, 16
+        elif self.type == 2: self.score_value, self.image_x, self.image_y = 30, 32, 16
+    
     def update(self):
         self.x -= self.speed
-
-        if self.type == 1:  # 上下に移動する敵
-            if self.pattern == 0:
-                self.y += self.speed_y
-                if self.y > SCREEN_HEIGHT - self.h or self.y < 0:
-                    self.speed_y *= -1  # 反転
-            else:
-                # サイン波のような動き
-                self.y = 50 + 30 * pyxel.sin(self.x / 30)
-
-        if self.x < -self.w:
-            self.alive = False
-
-        self.animation_frame = (self.animation_frame + 1) % 4  # アニメーション速度
-
-        # 射撃処理
+        if self.type == 1:
+            if self.pattern == 0: self.y += self.speed_y
+            else: self.y = 50 + 30 * math.sin(self.x / 30)
+            if self.y > SCREEN_HEIGHT - self.h or self.y < 0: self.speed_y *= -1
+        if self.x < -self.w: self.alive = False
+        self.animation_frame = (self.animation_frame + 1) % 4
         if self.type == 2:
             self.shoot_timer += 1
             if self.shoot_timer >= self.shoot_delay:
                 self.shoot_timer = 0
-                return EnemyBullet(self.x, self.y)  # 弾を返す
+                return EnemyBullet(self.x, self.y, self.stage_number)
         return None
-
-    def draw(self):
-        pyxel.blt(self.x, self.y, 0, self.image_x, self.image_y, self.w, self.h, 0)
-
-    def is_colliding(self, bullet):
-        # 敵と弾の当たり判定を小さく
-        return (self.x - 3 < bullet.x + BULLET_WIDTH and
-                self.x + self.w + 3 > bullet.x and
-                self.y - 3 < bullet.y + BULLET_HEIGHT and
-                self.y + self.h + 3 > bullet.y)
-
-    def explode(self):
-        self.explosion = Explosion(self.x, self.y)
-        pyxel.play(SOUND_ENEMY_DEATH, 1)
-
-class Boss(Enemy):  # Enemyクラスを継承
-    def __init__(self, x, y):
-        super().__init__(x, y, 2)  # type2の敵として初期化
-        self.w = 32  # ボスの幅を大きく
-        self.h = 32  # ボスの高さを大きく
-        self.speed = 1  # ボスの速度を遅く
-        self.image_x = 0  # ボスの画像X座標
-        self.image_y = 32  # ボスの画像Y座標 (pyxresでボス画像を32,32の位置に配置)
-        self.score_value = 500  # ボスのスコア
-        self.max_hp = 300  # ボスの最大HP
-        self.hp = self.max_hp  # ボスのHP
-        self.damage = 50
-        self.shoot_delay = 30  # ボスの射撃間隔を短く
-        self.pattern = 0
-        self.type = 2
-
-    def update(self):
-        self.x -= self.speed
-
-        # ボスの動き (上下運動)
-        if self.pattern == 0:
-            self.y += 1
-            if self.y > SCREEN_HEIGHT - self.h or self.y < 0:
-                self.pattern = 1
-        else:
-            self.y -= 1
-            if self.y > SCREEN_HEIGHT - self.h or self.y < 0:
-                self.pattern = 0
-
-        if self.x < -self.w:
-            self.alive = False
-
-        # 射撃処理
-        self.shoot_timer += 1
-        if self.shoot_timer >= self.shoot_delay:
-            self.shoot_timer = 0
-            return EnemyBullet(self.x, self.y + self.h // 2)  # ボスは中心から弾を撃つ
-
-        return None
-
-    def draw(self):
-        pyxel.blt(self.x, self.y, 0, self.image_x, self.image_y, self.w, self.h, 0)
-
+    
     def take_damage(self, damage):
         self.hp -= damage
         if self.hp <= 0:
-            self.hp = 0
             self.alive = False
-
-    def is_colliding(self, bullet):
-        return (self.x - 3 < bullet.x + BULLET_WIDTH and
-                self.x + self.w + 3 > bullet.x and
-                self.y - 3 < bullet.y + BULLET_HEIGHT and
-                self.y + self.h + 3 > bullet.y)
-
-    def explode(self):
-        self.explosion = Explosion(self.x, self.y, is_boss=True)
-        pyxel.play(SOUND_BOSS_DEATH, 2)
+            
+    def draw(self):
+        pyxel.blt(self.x, self.y, 0, self.image_x, self.image_y, self.w, self.h, 0)
+        # HPバーを描画
+        if self.hp < self.max_hp:
+            hp_ratio = self.hp / self.max_hp
+            bar_color = 10 if hp_ratio > 0.5 else 9 if hp_ratio > 0.25 else 8
+            pyxel.rect(self.x, self.y - 4, self.w * hp_ratio, 2, bar_color)
+    
+    def is_colliding(self, bullet): return (self.x-3 < bullet.x+bullet.w and self.x+self.w+3 > bullet.x and self.y-3 < bullet.y+bullet.h and self.y+self.h+3 > bullet.y)
+    def explode(self): self.explosion = Explosion(self.x, self.y); pyxel.play(SOUND_ENEMY_DEATH, 1)
 
 class Explosion:
-    def __init__(self, x, y, is_boss=False):
-        self.x = x
-        self.y = y
-        self.frame = 0
-        self.is_boss = is_boss
-
-    def update(self):
-        self.frame += 1
-        return self.frame > 15  # 15フレームで消滅
-
-    def draw(self):
-        # 爆発エフェクトを描画
-        if self.is_boss:
-            pyxel.blt(self.x - 8, self.y - 8, 0, 32, 0, 32, 32, 0)
-        else:
-            pyxel.blt(self.x, self.y, 0, 48, 16, 16, 16, 0)
+    def __init__(self, x, y): self.x, self.y, self.frame = x, y, 0
+    def update(self): self.frame += 1; return self.frame > 15
+    def draw(self): pyxel.blt(self.x, self.y, 0, 48, 16, 16, 16, 0)
 
 class Stage:
     def __init__(self, stage_number):
         self.stage_number = stage_number
-        self.enemy_spawn_interval = ENEMY_SPAWN_INTERVAL - stage_number * 2  # ステージが進むごとに敵の出現頻度を上げる
-        if self.enemy_spawn_interval < 5:
-            self.enemy_spawn_interval = 5
-        #背景色をステージ数で変化
-        if stage_number == 10:
-            self.background_color = 9
-        else:
-          self.background_color = stage_number % 16
-
-        self.enemy_types = [0, 1, 2]  # 出現する敵の種類
-
-        # ステージごとの初期化処理 (背景、敵の種類、出現頻度など)
-        if stage_number == 1:
-            self.enemy_types = [0, 1]
-        elif stage_number == 2:
-            self.enemy_types = [1, 2]
-        elif stage_number == 3:
-            self.enemy_types = [0, 2]
-        # 以降、必要に応じてステージごとの設定を追加
-
-    def update(self):
-        # ステージ固有の更新処理 (時間経過による変化など)
-        pass
-
-    def draw(self):
-        # ステージ固有の描画処理 (背景など)
-        pyxel.cls(self.background_color)  # 背景色を設定
+        self.enemy_spawn_interval = max(2, ENEMY_SPAWN_INTERVAL - stage_number * 1.5)
+        self.background_color, self.enemy_types = stage_number % 16, [0, 1, 2]
+    def draw(self): pyxel.cls(self.background_color)
 
 class App:
     def __init__(self):
-        pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT)  # 画面サイズ変更
-        pyxel.load("frog_shooting.pyxres")
-
-        # サウンドの設定 (pyxresファイルで定義)
-        # BGMの再生
-        pyxel.playm(MUSIC_STAGE, loop=True)
-
+        pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT); pyxel.load("frog_shooting.pyxres"); pyxel.playm(MUSIC_STAGE, loop=True)
         self.frog = Frog(32, pyxel.height // 2)
-        self.bullets = []
-        self.enemy_bullets = []
-        self.enemies = []
-        self.explosions = []  # 爆発エフェクトリスト
+        self.bullets, self.enemy_bullets, self.enemies, self.explosions, self.lasers, self.missiles = [], [], [], [], [], []
         self.stars = [Star(random.randint(0, SCREEN_WIDTH), random.randint(0, SCREEN_HEIGHT)) for _ in range(STAR_COUNT)]
-        self.score = 0
-        self.frame_count = 0  # フレーム数をカウント
-        self.game_over = False  # ゲームオーバーフラグ
-        self.stage_number = 1  # 現在のステージ番号
-        self.stage = Stage(self.stage_number)
-        self.stage_cleared = False
-        self.boss = None  # ボス
-
+        self.force_items, self.funnel_items, self.missile_items = [], [], []
+        self.score, self.frame_count, self.game_over, self.stage_cleared = 0, 0, False, False
+        self.stage_number, self.stage, self.missile_cooldown = 1, Stage(1), 0
+        self.frog.add_force()
         pyxel.run(self.update, self.draw)
 
     def reset_for_next_stage(self):
-        self.bullets = []
-        self.enemy_bullets = []
-        self.enemies = []
-        self.explosions = []
-        self.frog.hp = FROG_MAX_HP
-        self.frog.alive = True
-        self.stage_cleared = False
-        self.boss = None
+        self.bullets, self.enemy_bullets, self.enemies, self.explosions, self.lasers, self.missiles = [], [], [], [], [], []
+        self.force_items, self.funnel_items, self.missile_items = [], [], []
+        self.frog.hp, self.frog.alive, self.stage_cleared = FROG_MAX_HP, True, False
 
     def update(self):
-        if self.game_over:
-            return  # ゲームオーバーなら更新処理を停止
-
-        if self.stage_cleared:
-            return  # ステージクリア中は更新を停止
-
+        if self.game_over or self.stage_cleared: return
         self.frame_count += 1
+        if self.frog.alive: self.frog.update()
+        
+        for group in [self.stars, self.bullets, self.enemy_bullets, self.force_items, self.funnel_items, self.missile_items]:
+            for obj in group: obj.update()
+        for obj in self.explosions[:]:
+            if obj.update(): self.explosions.remove(obj)
+        for obj in self.lasers[:]:
+            if obj.update(): self.lasers.remove(obj)
+        for obj in self.missiles: obj.update(self.enemies)
+        
+        for funnel in self.frog.funnels:
+            if new_laser := funnel.auto_shoot(): self.lasers.append(new_laser)
+        if self.frog.has_missile:
+            self.missile_cooldown -= 1
+            if self.missile_cooldown <= 0 and self.enemies:
+                self.missiles.append(Missile(self.frog.x + self.frog.w / 2, self.frog.y + self.frog.h / 2)); self.missile_cooldown = 45
 
-        # ステージの更新
-        self.stage.update()
-
-        # 星の更新
-        for star in self.stars:
-            star.update()
-
-        # カエルの更新
-        if self.frog.alive:  # カエルが生きている時のみ更新
-            self.frog.update()
-
-        # 弾丸の更新
-        for bullet in self.bullets:
-            bullet.update()
-
-        # 敵の弾丸の更新
-        for bullet in self.enemy_bullets:
-            bullet.update()
-
-        # 弾丸が画面外に出たら削除
-        self.bullets = [bullet for bullet in self.bullets if not bullet.is_offscreen()]
-        self.enemy_bullets = [bullet for bullet in self.enemy_bullets if not bullet.is_offscreen()]
-
-        if self.stage_number != MAX_STAGE:  # MAX_STAGE以外は通常の敵を生成
-            # 敵の生成 (ステージごとに敵の出現頻度を変える)
-            if self.frame_count % self.stage.enemy_spawn_interval == 0:
-                enemy_type = random.choice(self.stage.enemy_types)  # ステージに合わせた敵タイプを選択
-                self.enemies.append(Enemy(SCREEN_WIDTH, random.randint(0, SCREEN_HEIGHT - ENEMY_HEIGHT), enemy_type))
-        else:  # MAX_STAGEはボスを生成
-            if self.boss is None:  # ボスがいない時
-                self.boss = Boss(SCREEN_WIDTH, SCREEN_HEIGHT // 2)  # ボスを生成
-            else:  # ボスがいる時
-                enemy_bullet = self.boss.update()  # ボスの更新
-                if enemy_bullet:
-                    self.enemy_bullets.append(enemy_bullet)
-
-        # 敵の更新
-        for enemy in self.enemies:
-            enemy_bullet = enemy.update()
-            if enemy_bullet:
-                self.enemy_bullets.append(enemy_bullet)
-
-        # 敵が画面外に出たら削除
-        self.enemies = [enemy for enemy in self.enemies if enemy.alive]
-
-        # 爆発エフェクトの更新
-        for explosion in self.explosions[:]:
-            if explosion.update():  # 更新処理をして、消滅判定があったら
-                self.explosions.remove(explosion)  # リストから削除
-
-        # 衝突判定 (弾丸 vs 敵)
-        for bullet in self.bullets[:]:  # リストをコピーしてイテレート
-            for enemy in self.enemies[:]:  # リストをコピーしてイテレート
-                if enemy.is_colliding(bullet):
-                    self.score += enemy.score_value  # 敵の種類に応じてスコアを加算
-                    enemy.explode()  # 爆発エフェクト
-                    self.explosions.append(enemy.explosion)
-                    self.enemies.remove(enemy)
-                    self.bullets.remove(bullet)
-                    break
-
-        # 衝突判定 (弾丸 vs ボス)
-        if self.boss and self.boss.alive:  # ボスが生きているとき
-            for bullet in self.bullets[:]:
-                if self.boss.is_colliding(bullet):
-                    self.boss.take_damage(20)  # 仮のダメージ量
-                    self.score += self.boss.score_value
-                    self.bullets.remove(bullet)
-                    if self.boss.hp <= 0:
-                        self.boss.explode()  # 爆発エフェクト
-                        self.explosions.append(self.boss.explosion)
-                        self.boss.alive = False
-                        self.stage_cleared = True
-                    break
-
-        # カエルと敵の衝突判定
         for enemy in self.enemies[:]:
-            if self.frog.alive and self.frog.is_colliding(enemy):  # カエルが生きているときのみ当たり判定
-                self.frog.take_damage(enemy.damage)  # ダメージを受ける
-                enemy.explode()  # 爆発エフェクト
-                self.explosions.append(enemy.explosion)
-                self.enemies.remove(enemy)  # 敵を削除
-                if not self.frog.alive:
-                    self.game_over = True
-                    break
+            if bullet := enemy.update(): self.enemy_bullets.append(bullet)
+        self.enemies = [e for e in self.enemies if e.alive]
+        if self.frame_count % self.stage.enemy_spawn_interval == 0:
+            self.enemies.append(Enemy(SCREEN_WIDTH, random.randint(0, SCREEN_HEIGHT - ENEMY_HEIGHT), random.choice(self.stage.enemy_types), self.stage_number))
 
-        # カエルと敵の弾の衝突判定
+        self.bullets = [b for b in self.bullets if not b.is_offscreen()]
+        self.enemy_bullets = [b for b in self.enemy_bullets if not b.is_offscreen()]
+        self.missiles = [m for m in self.missiles if not m.is_offscreen()]
+        self.force_items, self.funnel_items, self.missile_items = [i for i in self.force_items if i.alive], [i for i in self.funnel_items if i.alive], [i for i in self.missile_items if i.alive]
+
+        # Player projectiles vs Enemies
+        projectiles = self.bullets + self.missiles
+        for proj in projectiles:
+            for enemy in self.enemies[:]:
+                if enemy.alive and enemy.is_colliding(proj):
+                    enemy.take_damage(proj.damage)
+                    if not enemy.alive: self.handle_enemy_destruction(enemy)
+                    if proj in self.bullets: self.bullets.remove(proj)
+                    elif proj in self.missiles: self.missiles.remove(proj)
+                    break
+        for laser in self.lasers:
+            for enemy in self.enemies[:]:
+                if enemy.alive and laser.is_colliding(enemy):
+                    enemy.take_damage(laser.damage)
+                    if not enemy.alive: self.handle_enemy_destruction(enemy)
+
+        # Enemy projectiles vs Shields
         for bullet in self.enemy_bullets[:]:
-            if self.frog.alive and self.frog.is_colliding_enemy_bullet(bullet):  # カエルが生きているときのみ当たり判定
-                self.frog.take_damage(10)  # 固定ダメージ
-                self.enemy_bullets.remove(bullet)
-                if not self.frog.alive:
-                    self.game_over = True
+            if any(shield.is_colliding(bullet) for shield in self.frog.forces + self.frog.funnels): self.enemy_bullets.remove(bullet)
+        
+        # Player vs Dangers
+        if self.frog.alive:
+            for bullet in self.enemy_bullets[:]:
+                if self.frog.is_colliding(bullet): self.frog.take_damage(10); self.enemy_bullets.remove(bullet); break
+            for enemy in self.enemies[:]:
+                if self.frog.is_colliding(enemy):
+                    self.frog.take_damage(enemy.damage)
+                    enemy.take_damage(999) # 敵も即死
+                    if not enemy.alive: self.handle_enemy_destruction(enemy, no_item=True)
                     break
+            for item in self.force_items[:]:
+                if item.is_colliding(self.frog): self.frog.add_force(); self.force_items.remove(item)
+            for item in self.funnel_items[:]:
+                if item.is_colliding(self.frog): self.frog.add_funnel(); self.funnel_items.remove(item)
+            for item in self.missile_items[:]:
+                if item.is_colliding(self.frog): self.frog.add_missile(); self.missile_items.remove(item)
 
-        # 弾丸の発射
-        if self.frog.alive and (pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A)):  # カエルが生きているときのみ弾を発射
-            self.bullets.append(self.frog.shoot())
-
-        # ステージクリア判定
-        stage_clear_score = 500 + self.stage_number * 100  # 500 + ステージ数 * 100
-        if self.score >= stage_clear_score:
-            if self.stage_number != MAX_STAGE or (self.boss is not None and not self.boss.alive):  # MAX_STAGE以外 または ボスが倒されたら
-                self.stage_cleared = True
-
-        # ボスの当たり判定
-        if self.boss and self.frog.alive and self.frog.is_colliding(self.boss):
-            self.frog.take_damage(self.boss.damage)
-            if not self.frog.alive:
-                self.game_over = True
-
-        for bullet in self.enemy_bullets[:]:  # ボスの弾との当たり判定
-            if self.boss and self.frog.alive and self.frog.is_colliding_enemy_bullet(bullet):
-                self.frog.take_damage(10)
-                self.enemy_bullets.remove(bullet)
-                if not self.frog.alive:
-                    self.game_over = True
-                    break
+        if not self.frog.alive: self.game_over = True
+        
+        if self.frog.alive and (pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A)): self.bullets.extend(self.frog.shoot())
+        if self.score >= (500 + self.stage_number * 100): self.stage_cleared = True
+    
+    def handle_enemy_destruction(self, enemy, no_item=False):
+        self.score += enemy.score_value
+        enemy.explode(); self.explosions.append(enemy.explosion)
+        if not no_item and enemy.drop_item_on_death and random.randint(0, 3) == 0:
+            item_choices = ['force', 'funnel']
+            if not self.frog.has_missile: item_choices.append('missile')
+            item_type = random.choice(item_choices)
+            if item_type == 'force': self.force_items.append(ForceItem(enemy.x, enemy.y))
+            elif item_type == 'funnel': self.funnel_items.append(FunnelItem(enemy.x, enemy.y))
+            elif item_type == 'missile': self.missile_items.append(MissileItem(enemy.x, enemy.y))
+        if enemy in self.enemies: self.enemies.remove(enemy)
 
     def draw(self):
-        # ステージの描画
         self.stage.draw()
-
-        # 星の描画
-        for star in self.stars:
-            star.draw()
-
+        for star in self.stars: star.draw()
         if not self.game_over:
             if not self.stage_cleared:
-                self.frog.draw()
-                self.frog.draw_hp_bar(5, 15)  # HPバーを描画
-                for bullet in self.bullets:
-                    bullet.draw()
-                for bullet in self.enemy_bullets:
-                    bullet.draw()
-                for enemy in self.enemies:
-                    enemy.draw()
-
-                pyxel.text(5, 5, f"SCORE: {self.score}", 7)
-                pyxel.text(5, 25, f"STAGE: {self.stage_number}", 7)  # ステージ番号を表示
-
-                if self.boss and self.boss.alive:  # ボスを描画
-                    self.boss.draw()
-
-                # 爆発エフェクトを描画
-                for explosion in self.explosions:
-                    explosion.draw()
+                self.frog.draw(); self.frog.draw_hp_bar(5, 15)
+                for group in [self.enemies, self.bullets, self.enemy_bullets, self.force_items, self.funnel_items, self.missile_items, self.explosions, self.lasers, self.missiles]:
+                    for obj in group: obj.draw()
+                pyxel.text(5, 5, f"SCORE: {self.score}", 7); pyxel.text(5, 25, f"STAGE: {self.stage_number}", 7)
             else:
-                if self.stage_number != MAX_STAGE:
-                    pyxel.text(SCREEN_WIDTH // 2 - 40, SCREEN_HEIGHT // 2 - 10, "STAGE CLEAR!", 7)
-                    pyxel.text(SCREEN_WIDTH // 2 - 70, SCREEN_HEIGHT // 2 + 5, "PRESS SPACE TO NEXT STAGE", 7)
-                else:
-                    pyxel.text(SCREEN_WIDTH // 2 - 40, SCREEN_HEIGHT // 2 - 10, "GAME CLEAR!", 7)
-                    pyxel.text(SCREEN_WIDTH // 2 - 50, SCREEN_HEIGHT // 2 + 5, "THANKS FOR PLAYING!", 7)
-
-                if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A):  # スペースキーで次のステージへ
-                    if self.stage_number < MAX_STAGE:  # MAX_STAGEより小さい場合
-                        self.stage_number += 1
-                        self.stage = Stage(self.stage_number)
-                        self.reset_for_next_stage()
-                        self.score = 0  # スコアをリセット
+                pyxel.text(SCREEN_WIDTH//2-40, SCREEN_HEIGHT//2-10, "STAGE CLEAR!", 7)
+                pyxel.text(SCREEN_WIDTH//2-70, SCREEN_HEIGHT//2+5, "PRESS SPACE TO NEXT STAGE", 7)
+                if pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.GAMEPAD1_BUTTON_A):
+                    self.stage_number += 1; self.stage = Stage(self.stage_number); self.reset_for_next_stage(); self.score = 0
         else:
-            pyxel.text(SCREEN_WIDTH // 2 - 30, SCREEN_HEIGHT // 2 - 10, "GAME OVER", 8)
-            pyxel.text(SCREEN_WIDTH // 2 - 40, SCREEN_HEIGHT // 2 + 5, f"SCORE: {self.score}", 7)  # スコアを表示
+            pyxel.text(SCREEN_WIDTH//2-30, SCREEN_HEIGHT//2-10, "GAME OVER", 8)
+            pyxel.text(SCREEN_WIDTH//2-40, SCREEN_HEIGHT//2+5, f"SCORE: {self.score}", 7)
+            pyxel.text(SCREEN_WIDTH//2-45, SCREEN_HEIGHT//2+15, f"REACHED STAGE: {self.stage_number}", 7)
 
 App()
